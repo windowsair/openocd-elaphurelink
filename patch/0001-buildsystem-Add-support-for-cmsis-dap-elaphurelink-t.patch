@@ -1,0 +1,60 @@
+From 6dd694975e5b35aa313f0e69bc765abfacadf08d Mon Sep 17 00:00:00 2001
+From: windowsair <dev@airkyi.com>
+Date: Sat, 10 May 2025 19:42:31 +0800
+Subject: [PATCH 1/2] buildsystem: Add support for cmsis dap elaphurelink
+ target
+
+Signed-off-by: windowsair <dev@airkyi.com>
+---
+ configure.ac                 | 10 ++++++++++
+ src/jtag/drivers/Makefile.am |  6 ++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/configure.ac b/configure.ac
+index 567152b0a..1ca602503 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -644,6 +644,15 @@ PKG_CHECK_MODULES([LIBUSB1], [libusb-1.0], [
+ 	AC_MSG_WARN([libusb-1.x not found, trying legacy libusb-0.1 as a fallback; consider installing libusb-1.x instead])
+ ])
+ 
++PKG_CHECK_MODULES([LIBUV], [libuv-static], [
++  use_libuv=yes
++  AC_SUBST(LIBUV_CFLAGS)
++  AC_SUBST(LIBUV_LIBS)
++], [
++  use_libuv=no
++  AC_MSG_ERROR([libuv-static not found. Please install it.])
++])
++
+ AC_ARG_WITH([capstone],
+ 		AS_HELP_STRING([--with-capstone], [Use Capstone disassembly library (default=auto)])
+ 	, [
+@@ -783,6 +792,7 @@ AM_CONDITIONAL([GW16012], [test "x$build_gw16012" = "xyes"])
+ AM_CONDITIONAL([REMOTE_BITBANG], [test "x$build_remote_bitbang" = "xyes"])
+ AM_CONDITIONAL([SYSFSGPIO], [test "x$build_sysfsgpio" = "xyes"])
+ AM_CONDITIONAL([USE_LIBUSB1], [test "x$use_libusb1" = "xyes"])
++AM_CONDITIONAL([USE_LIBUV], [test "x$use_libuv" = "xyes"])
+ AM_CONDITIONAL([IS_CYGWIN], [test "x$is_cygwin" = "xyes"])
+ AM_CONDITIONAL([IS_MINGW], [test "x$is_mingw" = "xyes"])
+ AM_CONDITIONAL([IS_WIN32], [test "x$is_win32" = "xyes"])
+diff --git a/src/jtag/drivers/Makefile.am b/src/jtag/drivers/Makefile.am
+index 8be834859..6d3ab4136 100644
+--- a/src/jtag/drivers/Makefile.am
++++ b/src/jtag/drivers/Makefile.am
+@@ -30,6 +30,12 @@ DRIVERFILES += %D%/libusb_helper.c
+ %C%_libocdjtagdrivers_la_LIBADD += $(LIBUSB1_LIBS)
+ endif
+ 
++if USE_LIBUV
++DRIVERFILES += %D%/cmsis_dap_elaphurelink.c
++%C%_libocdjtagdrivers_la_CPPFLAGS += $(LIBUV_CFLAGS)
++%C%_libocdjtagdrivers_la_LIBADD += $(LIBUV_LIBS)
++endif
++
+ if USE_LIBFTDI
+ %C%_libocdjtagdrivers_la_CPPFLAGS += $(LIBFTDI_CFLAGS)
+ %C%_libocdjtagdrivers_la_LIBADD += $(LIBFTDI_LIBS)
+-- 
+2.34.1.windows.1
+

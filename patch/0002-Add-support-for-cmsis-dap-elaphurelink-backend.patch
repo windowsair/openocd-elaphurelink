@@ -1,0 +1,63 @@
+From 54a296a7168a64fbd9740e59610e5db6d6baebe6 Mon Sep 17 00:00:00 2001
+From: windowsair <dev@airkyi.com>
+Date: Sat, 10 May 2025 19:44:11 +0800
+Subject: [PATCH 2/2] Add support for cmsis dap elaphurelink backend
+
+Signed-off-by: windowsair <dev@airkyi.com>
+---
+ src/jtag/drivers/cmsis_dap.c | 10 +++++++++-
+ src/jtag/drivers/cmsis_dap.h |  2 ++
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/src/jtag/drivers/cmsis_dap.c b/src/jtag/drivers/cmsis_dap.c
+index 2f776cb38..2fa51c7e4 100644
+--- a/src/jtag/drivers/cmsis_dap.c
++++ b/src/jtag/drivers/cmsis_dap.c
+@@ -47,6 +47,7 @@ static const struct cmsis_dap_backend *const cmsis_dap_backends[] = {
+ #if BUILD_CMSIS_DAP_HID == 1
+ 	&cmsis_dap_hid_backend,
+ #endif
++	&cmsis_dap_elaphurelink_backend,
+ };
+ 
+ /* USB Config */
+@@ -2263,7 +2264,7 @@ static const struct command_registration cmsis_dap_subcommand_handlers[] = {
+ 		.handler = &cmsis_dap_handle_backend_command,
+ 		.mode = COMMAND_CONFIG,
+ 		.help = "set the communication backend to use (USB bulk or HID).",
+-		.usage = "(auto | usb_bulk | hid)",
++		.usage = "(auto | usb_bulk | hid | elaphurelink)",
+ 	},
+ 	{
+ 		.name = "quirk",
+@@ -2281,6 +2282,13 @@ static const struct command_registration cmsis_dap_subcommand_handlers[] = {
+ 		.usage = "<cmd>",
+ 	},
+ #endif
++	{
++		.name = "elaphurelink",
++		.chain = cmsis_dap_elaphurelink_subcommand_handlers,
++		.mode = COMMAND_ANY,
++		.help = "elaphurelink commands",
++		.usage = "<cmd>",
++	},
+ 	COMMAND_REGISTRATION_DONE
+ };
+ 
+diff --git a/src/jtag/drivers/cmsis_dap.h b/src/jtag/drivers/cmsis_dap.h
+index e47697d1f..f28a6ed4f 100644
+--- a/src/jtag/drivers/cmsis_dap.h
++++ b/src/jtag/drivers/cmsis_dap.h
+@@ -72,7 +72,9 @@ struct cmsis_dap_backend {
+ 
+ extern const struct cmsis_dap_backend cmsis_dap_hid_backend;
+ extern const struct cmsis_dap_backend cmsis_dap_usb_backend;
++extern const struct cmsis_dap_backend cmsis_dap_elaphurelink_backend;
+ extern const struct command_registration cmsis_dap_usb_subcommand_handlers[];
++extern const struct command_registration cmsis_dap_elaphurelink_subcommand_handlers[];
+ 
+ #define REPORT_ID_SIZE   1
+ 
+-- 
+2.34.1.windows.1
+
