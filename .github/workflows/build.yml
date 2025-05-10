@@ -1,0 +1,52 @@
+name: build
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+    - uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: true
+        install: >-
+          autotools
+          base-devel
+          git
+          mingw-w64-ucrt-x86_64-capstone
+          mingw-w64-ucrt-x86_64-hidapi
+          mingw-w64-ucrt-x86_64-libftdi
+          mingw-w64-ucrt-x86_64-libjaylink
+          mingw-w64-ucrt-x86_64-libusb
+          mingw-w64-ucrt-x86_64-libuv
+          mingw-w64-ucrt-x86_64-toolchain
+    - shell: cmd
+      run: git config --global core.autocrlf input
+    - uses: actions/checkout@v4
+    - name: Build
+      shell: msys2 {0}
+      run: |
+        mkdir install
+        git clone --recursive https://github.com/openocd-org/openocd.git && cd openocd
+        git checkout cd9e64a25ac167d188859e991201d3fe492a91e1
+        git apply ../patch/*.patch
+        cp ../cmsis_dap_elaphurelink.c src/jtag/drivers
+        cp ../elaphurelink.cfg tcl/interface
+        ./bootstrap
+        ./configure --prefix=$PWD/../install
+        make -j12
+        make install
+    - name: Copy DLL
+      run: |
+        cd $GITHUB_WORKSPACE/install/bin
+        cp /ucrt64/bin/libcapstone.dll ./
+        cp /ucrt64/bin/libftdi1.dll ./
+        cp /ucrt64/bin/libhidapi-0.dll ./
+        cp /ucrt64/bin/libjaylink-0.dll ./
+    - uses: actions/upload-artifact@v4
+      with:
+        name: elaphurelink-openocd-win32-x64
+        path: install
