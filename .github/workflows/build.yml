@@ -3,12 +3,24 @@ on: [push, pull_request]
 
 jobs:
   build:
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        sys:
+          - { os: windows-latest, shell: 'msys2 {0}', artifact: 'elaphurelink-openocd-win32-x64' }
+          - { os: ubuntu-latest,  shell: bash, artifact: 'elaphurelink-openocd-linux-x64'  }
+    runs-on: ${{ matrix.sys.os }}
     defaults:
       run:
-        shell: msys2 {0}
+        shell: ${{ matrix.sys.shell }}
     steps:
-    - uses: msys2/setup-msys2@v2
+    - name: Prepare
+      if: ${{ matrix.sys.os == 'ubuntu-latest' }}
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libtool pkg-config libcapstone-dev libhidapi-dev libftdi1-dev libusb-1.0-0-dev libuv1-dev libjaylink-dev
+    - name: Setup msys2
+      if: ${{ matrix.sys.os == 'windows-latest' }}
+      uses: msys2/setup-msys2@v2
       with:
         msystem: UCRT64
         update: true
@@ -23,11 +35,12 @@ jobs:
           mingw-w64-ucrt-x86_64-libusb
           mingw-w64-ucrt-x86_64-libuv
           mingw-w64-ucrt-x86_64-toolchain
-    - shell: cmd
+    - name: Git config setting
+      if: ${{ matrix.sys.os == 'windows-latest' }}
+      shell: cmd
       run: git config --global core.autocrlf input
     - uses: actions/checkout@v4
     - name: Build
-      shell: msys2 {0}
       run: |
         mkdir install
         git clone --recursive https://github.com/openocd-org/openocd.git && cd openocd
@@ -40,6 +53,7 @@ jobs:
         make -j12
         make install
     - name: Copy DLL
+      if: ${{ matrix.sys.os == 'windows-latest' }}
       run: |
         cd $GITHUB_WORKSPACE/install/bin
         cp /ucrt64/bin/libcapstone.dll ./
@@ -48,5 +62,5 @@ jobs:
         cp /ucrt64/bin/libjaylink-0.dll ./
     - uses: actions/upload-artifact@v4
       with:
-        name: elaphurelink-openocd-win32-x64
+        name: ${{ matrix.sys.artifact }}
         path: install
