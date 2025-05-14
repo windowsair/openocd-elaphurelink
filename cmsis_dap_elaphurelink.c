@@ -329,7 +329,7 @@ static void on_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf)
 		ctx->last_read_error = nread;
 		LOG_WARNING("elaphureLink read error: %s\n", uv_strerror(nread));
 		if (nread == UV_EOF)
-			printf("End of stream\n");
+			LOG_WARNING("elaphureLink: End of stream\n");
 
 		uv_read_stop(stream);
 		/* TODO:error process */
@@ -549,8 +549,6 @@ static int cmsis_dap_elaphurelink_open(struct cmsis_dap *dap, uint16_t vids[], u
 		goto fail_handshake;
 	}
 
-	printf("handshake done!\n");
-
 	return ERROR_OK;
 
 fail_handshake:
@@ -643,7 +641,6 @@ static void cmsis_dap_elaphurelink_free(struct cmsis_dap *dap)
 static void cmsis_dap_elaphurelink_cancel_all(struct cmsis_dap *dap)
 {
 	(void)dap;
-	printf("enter cancel all\n");
 
 	return;
 }
