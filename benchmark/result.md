@@ -1,5 +1,11 @@
 # Overview
 
+Version:
+
+```
+Open On-Chip Debugger 0.12.0+dev-01812-gcd9e64a25-dirty (2025-05-11-07:45)
+```
+
 Target: STM32F407VGT6
 Interface:
 

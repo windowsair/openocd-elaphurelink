@@ -4,7 +4,7 @@
 
 ## Overview
 
-elaphureLink-OpenOCD provides direct TCP between CMSIS-DAP probe and OpenOCD.
+elaphureLink-OpenOCD provides direct TCP/IP connection between CMSIS-DAP probe and OpenOCD.
 
 > elaphureLink Project: https://github.com/windowsair/elaphureLink
 
@@ -17,7 +17,7 @@ Supported system:
 - [x] Windows
 - [x] Linux
 
-> Ubuntu: > 20.04
+> Ubuntu: 20.04 or later.
 
 ## Getting Started
 
