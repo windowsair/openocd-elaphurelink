@@ -44,7 +44,7 @@
 #define VERSION_MINOR(x)	(((x) >> 8) & 0xff)
 #define VERSION_REVISION(x)	(((x) >> 0) & 0xff)
 
-static char k_connect_addr[100] = "192.168.137.202";
+static char k_connect_addr[100] = "127.0.0.1";
 
 enum elaphurelink_send_data_type {
 	HANDSHAKE_DATA = 0,
@@ -594,7 +594,7 @@ static int cmsis_dap_elaphurelink_read(struct cmsis_dap *dap, int transfer_timeo
 	 * Just check if there is any write request, otherwise return timeout
 	 * directly.
 	 */
-	if (ctx->read_req_count == ctx->write_req_count)
+	if (transfer_timeout_ms && ctx->read_req_count == ctx->write_req_count)
 		return ERROR_TIMEOUT_REACHED;
 
 	ret = fill_response_buffer(ctx, dap->response, &response_status);

@@ -1,0 +1,21 @@
+#
+# openocd coding style
+#
+# The LLVM style is extremely dense, both vertically and
+# horizontally. To get a full summary of what the base style includes
+# try:
+#   clang-format -style=llvm -dump-config
+BasedOnStyle: LLVM
+# These are not explicit stated in the documentation but most of the
+# code in the repo follows this form.
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: false
+AlignConsecutiveMacros: Consecutive
+BreakBeforeBraces: Linux
+# "use TAB characters for indentation; do NOT use spaces"
+UseTab: Always
+# "displayed TAB width is 4 characters"
+IndentWidth: 4
+TabWidth: 4
+ColumnLimit: 120
+SortIncludes: false
