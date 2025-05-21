@@ -1,3 +1,4 @@
 .vscode/
 *.o
 test/unit_test
+test/unit_test.exe
