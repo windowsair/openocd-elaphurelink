@@ -282,7 +282,7 @@ static void read_handshake_data(struct elaphurelink_context *ctx, size_t nread, 
 	}
 
 	if (ctx->byte_header_read != handshake_res_len) {
-		len = MIN(nread, handshake_res_len);
+		len = MIN(nread, (size_t)handshake_res_len);
 		memcpy(&ctx->command_response_buffer[ctx->byte_header_read], base, len);
 		ctx->byte_header_read += len;
 		nread -= len;
