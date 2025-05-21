@@ -1,0 +1,43 @@
+name: test
+on: [push, pull_request]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        sys:
+          - { os: windows-latest, shell: 'msys2 {0}' }
+          - { os: ubuntu-latest,  shell: bash  }
+    runs-on: ${{ matrix.sys.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.sys.shell }}
+    steps:
+    - name: Prepare
+      if: ${{ matrix.sys.os == 'ubuntu-latest' }}
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libtool pkg-config libuv1-dev
+    - name: Setup msys2
+      if: ${{ matrix.sys.os == 'windows-latest' }}
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: true
+        install: >-
+          autotools
+          base-devel
+          mingw-w64-ucrt-x86_64-libuv
+          mingw-w64-ucrt-x86_64-toolchain
+    - name: Git config setting
+      if: ${{ matrix.sys.os == 'windows-latest' }}
+      shell: cmd
+      run: git config --global core.autocrlf input
+    - uses: actions/checkout@v4
+    - name: Build
+      run: |
+        cd test
+        make
+    - name: Run Test
+      run: |
+        ./test/unit_test
