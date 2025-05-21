@@ -1,11 +1,18 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <time.h>
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -36,7 +43,7 @@ static int recv_all(int fd, uint8_t *buf, int len)
 	int ret;
 
 	while (len) {
-		ret = recv(fd, buf, len, 0);
+		ret = recv(fd, (void *)buf, len, 0);
 		if (ret <= 0)
 			return ret;
 		len -= ret;
@@ -86,7 +93,7 @@ static int normal_handshake_send_res(int fd)
 	unsigned char reply_data[] = {0x8A, 0x65, 0x6C, 0x70, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04};
 	int ret;
 
-	ret = send(fd, reply_data, sizeof(reply_data), 0);
+	ret = send(fd, (void *)reply_data, sizeof(reply_data), 0);
 	if (ret < 0) {
 		perror("Failed to send data\n");
 		goto fail;
@@ -104,7 +111,7 @@ static int handshake_send_unexpected_data(int fd)
 	unsigned char reply_data[12] = {0x00};
 	int ret;
 
-	ret = send(fd, reply_data, sizeof(reply_data), 0);
+	ret = send(fd, (void *)reply_data, sizeof(reply_data), 0);
 	if (ret < 0) {
 		perror("Failed to send data\n");
 		goto fail;
@@ -122,7 +129,7 @@ static int handshake_send_low_version(int fd)
 	unsigned char reply_data[] = {0x8A, 0x65, 0x6C, 0x70, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 	int ret;
 
-	ret = send(fd, reply_data, sizeof(reply_data), 0);
+	ret = send(fd, (void *)reply_data, sizeof(reply_data), 0);
 	if (ret < 0) {
 		perror("Failed to send data\n");
 		goto fail;
@@ -164,7 +171,7 @@ static int normal_enter_vendor_scope_send_res(int fd)
 	unsigned char reply_data[] = {0x88, 0x00, 0x00, 0x00};
 	int ret;
 
-	ret = send(fd, reply_data, sizeof(reply_data), 0);
+	ret = send(fd, (void *)reply_data, sizeof(reply_data), 0);
 	if (ret < 0) {
 		perror("Failed to send data\n");
 		return -1;
@@ -178,7 +185,7 @@ static int enter_vendor_scope_fail_res(int fd)
 	unsigned char reply_data[] = {0x88, 0x1, 0x00, 0x00};
 	int ret;
 
-	ret = send(fd, reply_data, sizeof(reply_data), 0);
+	ret = send(fd, (void *)reply_data, sizeof(reply_data), 0);
 	if (ret < 0) {
 		perror("Failed to send data\n");
 		return -1;
@@ -452,7 +459,7 @@ int server_read_only(int fd)
 		k_test_data[i].length = len;
 		memset(&k_test_data[i].data[0], i, len);
 
-		ret = send(fd, send_buf, 4 + len, 0);
+		ret = send(fd, (void *)send_buf, 4 + len, 0);
 		if (ret < 0) {
 			printf("Failed to send data, ret:%d\n", ret);
 			goto fail;
@@ -497,7 +504,7 @@ int server()
 		exit(EXIT_FAILURE);
 	}
 
-	ret = setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+	ret = setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (void *)&opt, sizeof(opt));
 	if (ret < 0) {
 		perror("Failed to set server socket opt\n");
 		goto clean;
@@ -550,6 +557,14 @@ void server_thread(void *arg)
 int main(int argc, const char *const argv[])
 {
 	uv_thread_t tid;
+
+#ifdef _WIN32
+	WORD sockVersion = MAKEWORD(2, 2);
+	WSADATA data;
+	if (WSAStartup(sockVersion, &data) != 0) {
+		return -1;
+	}
+#endif
 
 	uv_thread_create(&tid, server_thread, NULL);
 	sleep(1);
