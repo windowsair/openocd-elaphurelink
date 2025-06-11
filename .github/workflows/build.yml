@@ -60,6 +60,7 @@ jobs:
         cp /ucrt64/bin/libftdi1.dll ./
         cp /ucrt64/bin/libhidapi-0.dll ./
         cp /ucrt64/bin/libjaylink-0.dll ./
+        cp /ucrt64/bin/libusb-1.0.dll ./
     - uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.sys.artifact }}
