@@ -466,6 +466,8 @@ static int elaphurelink_handshake(struct elaphurelink_context *ctx)
 	return 0;
 }
 
+#define DNS_RETRY_COUNT 5
+
 static int cmsis_dap_elaphurelink_open(struct cmsis_dap *dap, uint16_t vids[], uint16_t pids[], const char *serial)
 {
 	(void)vids;
@@ -527,9 +529,20 @@ static int cmsis_dap_elaphurelink_open(struct cmsis_dap *dap, uint16_t vids[], u
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 	hints.ai_flags = 0;
-	ret = uv_getaddrinfo(ctx->loop, &getaddr_req, NULL, k_connect_addr, "3240", &hints);
+
+	i = 0;
+	while (i++ < DNS_RETRY_COUNT) {
+		ret = uv_getaddrinfo(ctx->loop, &getaddr_req, NULL, k_connect_addr, "3240", &hints);
+		if (ret == 0) {
+			break;
+		} else if (ret != UV_EAI_NONAME) {
+			LOG_ERROR("elaphureLink: DNS resolve failed, %s, %d\n", uv_strerror(ret), ret);
+			goto fail;
+		}
+	}
+
 	if (ret) {
-		LOG_ERROR("elaphureLink: DNS resolve failed, %s\n", uv_strerror(ret));
+		LOG_ERROR("elaphureLink: DNS resolve retry failed\n");
 		goto fail;
 	}
 
