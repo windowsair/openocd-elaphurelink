@@ -472,6 +472,9 @@ static int cmsis_dap_elaphurelink_open(struct cmsis_dap *dap, uint16_t vids[], u
 	(void)pids;
 	(void)serial;
 
+	struct sockaddr_in *dest;
+	uv_getaddrinfo_t getaddr_req;
+	struct addrinfo hints = { 0 };
 	struct elaphurelink_context *ctx;
 	int ret, i;
 
@@ -520,11 +523,21 @@ static int cmsis_dap_elaphurelink_open(struct cmsis_dap *dap, uint16_t vids[], u
 	if (ret)
 		goto fail;
 
-	struct sockaddr_in dest;
-	uv_ip4_addr(k_connect_addr, 3240, &dest);
+	hints.ai_family = PF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_protocol = IPPROTO_TCP;
+	hints.ai_flags = 0;
+	ret = uv_getaddrinfo(ctx->loop, &getaddr_req, NULL, k_connect_addr, "3240", &hints);
+	if (ret) {
+		LOG_ERROR("elaphureLink: DNS resolve failed, %s\n", uv_strerror(ret));
+		goto fail;
+	}
+
+	dest = (struct sockaddr_in *)getaddr_req.addrinfo->ai_addr;
 
 	ctx->connect_req.data = ctx;
-	uv_tcp_connect(&ctx->connect_req, &ctx->socket, (const struct sockaddr *)&dest, on_connect);
+	uv_tcp_connect(&ctx->connect_req, &ctx->socket, (const struct sockaddr *)dest, on_connect);
+	uv_freeaddrinfo(getaddr_req.addrinfo);
 
 	/* Wait TCP handshake */
 	while (ctx->state == TCP_HANDSHAKE)
