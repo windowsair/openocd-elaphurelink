@@ -604,6 +604,10 @@ static void cmsis_dap_elaphurelink_close(struct cmsis_dap *dap)
 	uv_mutex_destroy(&ctx->read_producer_mutex);
 	uv_mutex_destroy(&ctx->read_consumer_mutex);
 	free(ctx);
+	/* dap->packet_buffer aliased ctx->command_response_buffer (see open()); ctx is now
+	 * freed, so clear it to stop cmsis_dap_close() free()-ing a dangling interior pointer. */
+	dap->bdata = NULL;
+	dap->packet_buffer = NULL;
 }
 
 static int cmsis_dap_elaphurelink_read(struct cmsis_dap *dap, int transfer_timeout_ms, struct timeval *wait_timeout)
