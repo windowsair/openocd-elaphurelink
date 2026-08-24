@@ -138,8 +138,10 @@ static void notify_read_data_available(struct buffer_list *handle)
 {
 	struct elaphurelink_context *ctx = handle->ctx;
 
+	uv_mutex_lock(&ctx->read_consumer_mutex);
 	atomic_store_explicit(&handle->status, BUFFER_READ_DATA_AVAILABLE, memory_order_release);
 	uv_cond_broadcast(&ctx->read_consumer_cond);
+	uv_mutex_unlock(&ctx->read_consumer_mutex);
 }
 
 static void write_buffer_enqueue(struct elaphurelink_context *ctx, void *buffer, size_t len,
@@ -183,8 +185,10 @@ static void write_buffer_cb(uv_write_t *req, int status)
 		LOG_ERROR("elaphureLink: write callback error:%d\n", status);
 	}
 
+	uv_mutex_lock(&ctx->write_producer_mutex);
 	atomic_store_explicit(&handle->status, BUFFER_IDLE, memory_order_release);
 	uv_cond_broadcast(&ctx->write_producer_cond);
+	uv_mutex_unlock(&ctx->write_producer_mutex);
 }
 
 static void get_next_idle_read_buffer(struct elaphurelink_context *ctx, size_t len)
@@ -355,8 +359,10 @@ static int fill_response_buffer(struct elaphurelink_context *ctx, void *buffer, 
 	memcpy(buffer, ctx->read_buffer[idx].buffer, ret);
 	*reponse_status = ctx->read_buffer[idx].response_status;
 
+	uv_mutex_lock(&ctx->read_producer_mutex);
 	atomic_store_explicit(&ctx->read_buffer[idx].status, BUFFER_IDLE, memory_order_release);
 	uv_cond_broadcast(&ctx->read_producer_cond);
+	uv_mutex_unlock(&ctx->read_producer_mutex);
 
 	return ret;
 }
