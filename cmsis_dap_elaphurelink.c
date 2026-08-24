@@ -474,7 +474,8 @@ static int elaphurelink_handshake(struct elaphurelink_context *ctx)
 
 #define DNS_RETRY_COUNT 5
 
-static int cmsis_dap_elaphurelink_open(struct cmsis_dap *dap, uint16_t vids[], uint16_t pids[], const char *serial)
+static int cmsis_dap_elaphurelink_open(struct cmsis_dap *dap, const uint16_t vids[],
+									   const uint16_t pids[], const char *serial)
 {
 	(void)vids;
 	(void)pids;
@@ -616,10 +617,11 @@ static void cmsis_dap_elaphurelink_close(struct cmsis_dap *dap)
 	dap->packet_buffer = NULL;
 }
 
-static int cmsis_dap_elaphurelink_read(struct cmsis_dap *dap, int transfer_timeout_ms, struct timeval *wait_timeout)
+static int cmsis_dap_elaphurelink_read(struct cmsis_dap *dap, int transfer_timeout_ms,
+									   enum cmsis_dap_blocking blocking)
 {
 	(void)transfer_timeout_ms;
-	(void)wait_timeout;
+	(void)blocking;
 
 	struct elaphurelink_context *ctx = (struct elaphurelink_context *)dap->bdata;
 	uint8_t response_status;
