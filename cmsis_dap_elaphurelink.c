@@ -180,7 +180,7 @@ static void write_buffer_cb(uv_write_t *req, int status)
 
 	if (status) {
 		ctx->last_write_error = status;
-		LOG_ERROR("elaphureLink: wirte callback error:%d\n", status);
+		LOG_ERROR("elaphureLink: write callback error:%d\n", status);
 	}
 
 	atomic_store_explicit(&handle->status, BUFFER_IDLE, memory_order_release);
