@@ -22,6 +22,12 @@
 #include "helper/log.h"
 #include "utest.h"
 
+#ifdef _WIN32
+static int sock_close(SOCKET s) { return closesocket(s); }
+#else
+static int sock_close(int fd) { return close(fd); }
+#endif
+
 #define PORT		3240
 #define BUFFER_SIZE 1024
 
@@ -535,15 +541,17 @@ int server()
 
 		ret = server_case_list[i](new_socket);
 		if (ret) {
-			close(new_socket);
+			sock_close(new_socket);
 			goto clean;
 		}
 
-		close(new_socket);
+		sock_close(new_socket);
 	}
 
+	sock_close(server_fd);
+	return ret;
 clean:
-	close(server_fd);
+	sock_close(server_fd);
 	exit(ret);
 }
 
