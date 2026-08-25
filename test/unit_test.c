@@ -432,7 +432,7 @@ UTEST(read_only, read)
 
 	i = 0;
 	while (i < 500) {
-		len = cmsis_dap_elaphurelink_backend.read(&k_dap, 0, NULL);
+		len = cmsis_dap_elaphurelink_backend.read(&k_dap, 0, CMSIS_DAP_BLOCKING);
 		if (len == ERROR_TIMEOUT_REACHED)
 			continue;
 		ASSERT_EQ(len, k_test_data[i].length);
