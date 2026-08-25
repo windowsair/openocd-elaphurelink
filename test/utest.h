@@ -34,6 +34,8 @@
 #define SHEREDOM_UTEST_H_INCLUDED
 
 #ifdef _MSC_VER
+#pragma warning(push)
+
 /*
    Disable warning about not inlining 'inline' functions.
 */
@@ -94,6 +96,7 @@ typedef uint32_t utest_uint32_t;
 #endif
 
 #include <stddef.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -195,6 +198,9 @@ UTEST_C_FUNC __declspec(dllimport) int __stdcall QueryPerformanceFrequency(
 #define UTEST_USE_CLOCKGETTIME
 #endif
 
+#elif defined(_AIX)
+#include <time.h>
+
 #elif defined(__APPLE__)
 #include <time.h>
 #endif
@@ -202,11 +208,44 @@ UTEST_C_FUNC __declspec(dllimport) int __stdcall QueryPerformanceFrequency(
 #if defined(_MSC_VER) && (_MSC_VER < 1920)
 #define UTEST_PRId64 "I64d"
 #define UTEST_PRIu64 "I64u"
+#define UTEST_INT64_ARG(x) (x)
+#define UTEST_UINT64_ARG(x) (x)
 #else
+/* NetBSD hides the PRI macros from C++ before C++11 unless this is defined. */
+#if defined(__cplusplus) && !defined(__STDC_FORMAT_MACROS)
+#define __STDC_FORMAT_MACROS 1
+#endif
 #include <inttypes.h>
+#include <limits.h>
 
+/* Where uint64_t is not unsigned long the PRI macros use the ll length
+   modifier, which C90 and C++98 do not have. Only those builds print through
+   double instead; every other target keeps using the macros unchanged.
+
+   _MSC_VER is listed explicitly because neither of the other tests recognises
+   it: Windows is LLP64, so unsigned long is 32 bits even on x64, and MSVC
+   reports __cplusplus as 199711L without /Zc:__cplusplus and defines no
+   __STDC_VERSION__ in its default C mode. Anything reaching here is 1920 or
+   newer and prints 64-bit integers fine.
+
+   The PRI macros are tested for directly because the define above only works
+   when nothing has pulled <inttypes.h> in first. NetBSD reaches them through
+   <sys/inttypes.h>, which is guarded, so a header included earlier can settle
+   the question before this one is read. */
+#if (defined(PRId64) && defined(PRIu64)) &&                                    \
+    (defined(_MSC_VER) || (ULONG_MAX > 0xfffffffful) ||                        \
+     (defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L)) ||           \
+     (defined(__cplusplus) && (__cplusplus >= 201103L)))
 #define UTEST_PRId64 PRId64
 #define UTEST_PRIu64 PRIu64
+#define UTEST_INT64_ARG(x) (x)
+#define UTEST_UINT64_ARG(x) (x)
+#else
+#define UTEST_PRId64 ".0f"
+#define UTEST_PRIu64 ".0f"
+#define UTEST_INT64_ARG(x) UTEST_CAST(double, x)
+#define UTEST_UINT64_ARG(x) UTEST_CAST(double, x)
+#endif
 #endif
 
 #if defined(__cplusplus)
@@ -302,8 +341,8 @@ UTEST_C_FUNC __declspec(dllimport) int __stdcall QueryPerformanceFrequency(
     uninteresting, but for some reason MSVC's behaviour is to warn about
     including this system header. That *is* interesting
 */
-#pragma warning(disable : 4820)
 #pragma warning(push, 1)
+#pragma warning(disable : 4820)
 #include <io.h>
 #pragma warning(pop)
 #define UTEST_COLOUR_OUTPUT() (_isatty(_fileno(stdout)))
@@ -347,10 +386,12 @@ static UTEST_INLINE utest_int64_t utest_ns(void) {
   return utest_mul_div(counter.QuadPart, 1000000000, frequency.QuadPart);
 #elif defined(__linux__) && defined(__STRICT_ANSI__)
   return utest_mul_div(clock(), 1000000000, CLOCKS_PER_SEC);
+#elif defined(__APPLE__)
+  return UTEST_CAST(utest_int64_t, clock_gettime_nsec_np(CLOCK_UPTIME_RAW));
 #elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) ||    \
     defined(__NetBSD__) || defined(__DragonFly__) || defined(__sun__) ||       \
     defined(__HAIKU__)
-  struct timespec ts;
+  struct timespec ts = {0, 0};
 #if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L) &&              \
     !defined(__HAIKU__)
   timespec_get(&ts, TIME_UTC);
@@ -363,8 +404,10 @@ static UTEST_INLINE utest_int64_t utest_ns(void) {
 #endif
 #endif
   return UTEST_CAST(utest_int64_t, ts.tv_sec) * 1000 * 1000 * 1000 + ts.tv_nsec;
-#elif __APPLE__
-  return UTEST_CAST(utest_int64_t, clock_gettime_nsec_np(CLOCK_UPTIME_RAW));
+#elif defined(_AIX)
+  struct timespec ts = {0, 0};
+  clock_gettime(CLOCK_REALTIME, &ts);
+  return UTEST_CAST(utest_int64_t, ts.tv_sec) * 1000 * 1000 * 1000 + ts.tv_nsec;
 #elif __EMSCRIPTEN__
   return emscripten_performance_now() * 1000000.0;
 #else
@@ -378,6 +421,8 @@ struct utest_test_state_s {
   utest_testcase_t func;
   size_t index;
   char *name;
+  const char *file;
+  size_t line;
 };
 
 struct utest_state_s {
@@ -409,12 +454,21 @@ UTEST_EXTERN struct utest_state_s utest_state;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wvariadic-macros"
 #pragma clang diagnostic ignored "-Wc++98-compat-pedantic"
+#if __has_warning("-Wformat-nonliteral")
+#pragma clang diagnostic ignored "-Wformat-nonliteral"
 #endif
+#endif
+#if defined(_MSC_VER)
+UTEST_C_FUNC __declspec(noinline) int utest_printf_msvc(const char *format,
+                                                       ...);
+#define UTEST_PRINTF(...) ((void)utest_printf_msvc(__VA_ARGS__))
+#else
 #define UTEST_PRINTF(...)                                                      \
   if (utest_state.output) {                                                    \
     fprintf(utest_state.output, __VA_ARGS__);                                  \
   }                                                                            \
   printf(__VA_ARGS__)
+#endif
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif
@@ -484,7 +538,7 @@ template <> struct utest_type_deducer<short, false> {
 
 template <> struct utest_type_deducer<unsigned short, false> {
   static void _(const unsigned short s) {
-    UTEST_PRINTF("%u", static_cast<int>(s));
+    UTEST_PRINTF("%u", static_cast<unsigned>(s));
   }
 };
 
@@ -532,12 +586,18 @@ template <> struct utest_type_deducer<unsigned long long, false> {
 };
 
 template <> struct utest_type_deducer<bool, false> {
-  static void _(const bool i) { UTEST_PRINTF(i ? "true" : "false"); }
+  static void _(const bool i) {
+    if (i) {
+      UTEST_PRINTF("true");
+    } else {
+      UTEST_PRINTF("false");
+    }
+  }
 };
 
 template <typename T> struct utest_type_deducer<const T *, false> {
   static void _(const T *t) {
-    UTEST_PRINTF("%p", static_cast<void *>(const_cast<T *>(t)));
+    UTEST_PRINTF("%p", static_cast<const void *>(t));
   }
 };
 
@@ -551,6 +611,13 @@ template <typename T> struct utest_type_deducer<T, true> {
   }
 };
 
+// default printer for all other objects (specialize for custom printing)
+template <typename T> struct utest_type_deducer<T, false> {
+  static void _(const T &t) {
+    UTEST_PRINTF("(object %p)", static_cast<const void *>(&t));
+  }
+};
+
 template <> struct utest_type_deducer<std::nullptr_t, false> {
   static void _(std::nullptr_t t) {
     UTEST_PRINTF("%p", static_cast<void *>(t));
@@ -558,7 +625,7 @@ template <> struct utest_type_deducer<std::nullptr_t, false> {
 };
 
 template <typename T>
-UTEST_WEAK UTEST_OVERLOADABLE void utest_type_printer(const T t) {
+UTEST_WEAK UTEST_OVERLOADABLE void utest_type_printer(const T &t) {
   utest_type_deducer<T>::_(t);
 }
 
@@ -654,24 +721,90 @@ utest_type_printer(long long unsigned int i) {
 #elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L) &&            \
         !(defined(__MINGW32__) || defined(__MINGW64__)) ||                     \
     defined(__TINYC__)
+static UTEST_INLINE void utest_type_printer_bool(_Bool value) {
+  UTEST_PRINTF("%d", UTEST_CAST(int, value));
+}
+
+static UTEST_INLINE void utest_type_printer_char(char value) {
+  UTEST_PRINTF("%d", UTEST_CAST(int, value));
+}
+
+static UTEST_INLINE void utest_type_printer_signed_char(signed char value) {
+  UTEST_PRINTF("%d", UTEST_CAST(int, value));
+}
+
+static UTEST_INLINE void utest_type_printer_unsigned_char(unsigned char value) {
+  UTEST_PRINTF("%u", UTEST_CAST(unsigned int, value));
+}
+
+static UTEST_INLINE void utest_type_printer_short(short value) {
+  UTEST_PRINTF("%d", UTEST_CAST(int, value));
+}
+
+static UTEST_INLINE void
+utest_type_printer_unsigned_short(unsigned short value) {
+  UTEST_PRINTF("%u", UTEST_CAST(unsigned int, value));
+}
+
+static UTEST_INLINE void utest_type_printer_int(int value) {
+  UTEST_PRINTF("%d", value);
+}
+
+static UTEST_INLINE void utest_type_printer_long(long value) {
+  UTEST_PRINTF("%ld", value);
+}
+
+static UTEST_INLINE void utest_type_printer_long_long(long long value) {
+  UTEST_PRINTF("%lld", value);
+}
+
+static UTEST_INLINE void utest_type_printer_unsigned(unsigned value) {
+  UTEST_PRINTF("%u", value);
+}
+
+static UTEST_INLINE void utest_type_printer_unsigned_long(unsigned long value) {
+  UTEST_PRINTF("%lu", value);
+}
+
+static UTEST_INLINE void
+utest_type_printer_unsigned_long_long(unsigned long long value) {
+  UTEST_PRINTF("%llu", value);
+}
+
+static UTEST_INLINE void utest_type_printer_float(float value) {
+  UTEST_PRINTF("%f", UTEST_CAST(double, value));
+}
+
+static UTEST_INLINE void utest_type_printer_double(double value) {
+  UTEST_PRINTF("%f", value);
+}
+
+static UTEST_INLINE void utest_type_printer_long_double(long double value) {
+  UTEST_PRINTF("%Lf", value);
+}
+
+static UTEST_INLINE void utest_type_printer_pointer(const void *value) {
+  UTEST_PRINTF("%p", value);
+}
+
 #define utest_type_printer(val)                                                \
-  UTEST_PRINTF(                                                                \
-      _Generic((val),                                                          \
-      signed char: "%d",                                                       \
-      unsigned char: "%u",                                                     \
-      short: "%d",                                                             \
-      unsigned short: "%u",                                                    \
-      int: "%d",                                                               \
-      long: "%ld",                                                             \
-      long long: "%lld",                                                       \
-      unsigned: "%u",                                                          \
-      unsigned long: "%lu",                                                    \
-      unsigned long long: "%llu",                                              \
-      float: "%f",                                                             \
-      double: "%f",                                                            \
-      long double: "%Lf",                                                      \
-      default: _Generic((val - val), ptrdiff_t: "%p", default: "undef")),      \
-      (val))
+  _Generic((val),                                                              \
+      _Bool: utest_type_printer_bool,                                          \
+      char: utest_type_printer_char,                                           \
+      signed char: utest_type_printer_signed_char,                             \
+      unsigned char: utest_type_printer_unsigned_char,                         \
+      short: utest_type_printer_short,                                         \
+      unsigned short: utest_type_printer_unsigned_short,                       \
+      int: utest_type_printer_int,                                             \
+      long: utest_type_printer_long,                                           \
+      long long: utest_type_printer_long_long,                                 \
+      unsigned: utest_type_printer_unsigned,                                   \
+      unsigned long: utest_type_printer_unsigned_long,                         \
+      unsigned long long: utest_type_printer_unsigned_long_long,               \
+      float: utest_type_printer_float,                                         \
+      double: utest_type_printer_double,                                       \
+      long double: utest_type_printer_long_double,                             \
+      default: utest_type_printer_pointer)((val))
 #else
 /*
    we don't have the ability to print the values we got, so we create a macro
@@ -680,7 +813,34 @@ utest_type_printer(long long unsigned int i) {
 #define utest_type_printer(...) UTEST_PRINTF("undef")
 #endif
 
+#if defined(__clang__)
+#if __has_warning("-Wunsafe-buffer-usage-in-libc-call")
 #if defined(_MSC_VER)
+#define UTEST_SURPRESS_WARNING_BEGIN                                           \
+  __pragma(warning(push)) __pragma(warning(disable : 4127))                    \
+      __pragma(warning(disable : 4571)) __pragma(warning(disable : 4130))      \
+          _Pragma("clang diagnostic push")                                     \
+              _Pragma("clang diagnostic ignored \"-Wunsafe-buffer-usage-in-libc-call\"")
+#define UTEST_SURPRESS_WARNING_END                                             \
+  _Pragma("clang diagnostic pop") __pragma(warning(pop))
+#else
+#define UTEST_SURPRESS_WARNING_BEGIN                                           \
+  _Pragma("clang diagnostic push")                                             \
+      _Pragma("clang diagnostic ignored \"-Wunsafe-buffer-usage-in-libc-call\"")
+#define UTEST_SURPRESS_WARNING_END _Pragma("clang diagnostic pop")
+#endif
+#else
+#if defined(_MSC_VER)
+#define UTEST_SURPRESS_WARNING_BEGIN                                           \
+  __pragma(warning(push)) __pragma(warning(disable : 4127))                    \
+      __pragma(warning(disable : 4571)) __pragma(warning(disable : 4130))
+#define UTEST_SURPRESS_WARNING_END __pragma(warning(pop))
+#else
+#define UTEST_SURPRESS_WARNING_BEGIN
+#define UTEST_SURPRESS_WARNING_END
+#endif
+#endif
+#elif defined(_MSC_VER)
 #define UTEST_SURPRESS_WARNING_BEGIN                                           \
   __pragma(warning(push)) __pragma(warning(disable : 4127))                    \
       __pragma(warning(disable : 4571)) __pragma(warning(disable : 4130))
@@ -691,7 +851,7 @@ utest_type_printer(long long unsigned int i) {
 #endif
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
-#define UTEST_AUTO(x) auto
+#define UTEST_AUTO(x) const auto &
 #elif !defined(__cplusplus)
 
 #if defined(__clang__)
@@ -703,7 +863,11 @@ utest_type_printer(long long unsigned int i) {
           _Pragma("clang diagnostic pop")
 /* clang-format on */
 #else
+#if defined(__TINYC__)
 #define UTEST_AUTO(x) __typeof__(x + 0)
+#else
+#define UTEST_AUTO(x) __typeof__((void)0, (x))
+#endif
 #endif
 
 #else
@@ -900,6 +1064,47 @@ utest_strncpy_gcc(char *const dst, const char *const src, const size_t size) {
 #define EXPECT_FALSE_MSG(x, msg) UTEST_FALSE(x, msg, 0)
 #define ASSERT_FALSE(x) UTEST_FALSE(x, "", 1)
 #define ASSERT_FALSE_MSG(x, msg) UTEST_FALSE(x, msg, 1)
+
+#define UTEST_MEMEQ(x, y, size, msg, is_assert)                                \
+  UTEST_SURPRESS_WARNING_BEGIN do {                                            \
+    UTEST_SURPRESS_WARNINGS_BEGIN                                              \
+    size_t i = 0;                                                              \
+    const void *xEval = (x);                                                   \
+    const void *yEval = (y);                                                   \
+    const size_t sizeEval = UTEST_CAST(size_t, size);                          \
+    if (0 != memcmp(xEval, yEval, sizeEval)) {                                 \
+      UTEST_PRINTF("%s:%i: Failure\n", __FILE__, __LINE__);                    \
+      UTEST_PRINTF("  Expected : ");                                           \
+      for (i = 0; i < sizeEval; ++i) {                                         \
+        const unsigned char b =                                                \
+            UTEST_PTR_CAST(const unsigned char *, xEval)[i];                   \
+        UTEST_PRINTF("%02X ", b);                                              \
+      }                                                                        \
+      UTEST_PRINTF("\n");                                                      \
+      UTEST_PRINTF("    Actual : ");                                           \
+      for (i = 0; i < sizeEval; ++i) {                                         \
+        const unsigned char b =                                                \
+            UTEST_PTR_CAST(const unsigned char *, yEval)[i];                   \
+        UTEST_PRINTF("%02X ", b);                                              \
+      }                                                                        \
+      UTEST_PRINTF("\n");                                                      \
+      if (strlen(msg) > 0) {                                                   \
+        UTEST_PRINTF("   Message : %s\n", msg);                                \
+      }                                                                        \
+      *utest_result = UTEST_TEST_FAILURE;                                      \
+      if (is_assert) {                                                         \
+        return;                                                                \
+      }                                                                        \
+    }                                                                          \
+    UTEST_SURPRESS_WARNINGS_END                                                \
+  }                                                                            \
+  while (0)                                                                    \
+  UTEST_SURPRESS_WARNING_END
+
+#define EXPECT_MEMEQ(x, y, s) UTEST_MEMEQ(x, y, s, "", 0)
+#define EXPECT_MEMEQ_MSG(x, y, s, msg) UTEST_MEMEQ(x, y, s, msg, 0)
+#define ASSERT_MEMEQ(x, y, s) UTEST_MEMEQ(x, y, s, "", 1)
+#define ASSERT_MEMEQ_MSG(x, y, s, msg) UTEST_MEMEQ(x, y, s, msg, 1)
 
 #define UTEST_STREQ(x, y, msg, is_assert)                                      \
   UTEST_SURPRESS_WARNING_BEGIN do {                                            \
@@ -1132,25 +1337,53 @@ utest_strncpy_gcc(char *const dst, const char *const src, const size_t size) {
   UTEST_EXCEPTION_WITH_MESSAGE(x, exception_type, exception_message, msg, 1)
 #endif
 
-#if defined(__clang__)
-#if __has_warning("-Wunsafe-buffer-usage")
-#define UTEST_SURPRESS_WARNINGS_BEGIN                                          \
-  _Pragma("clang diagnostic push")                                             \
-      _Pragma("clang diagnostic ignored \"-Wunsafe-buffer-usage\"")
-#define UTEST_SURPRESS_WARNINGS_END _Pragma("clang diagnostic pop")
+#if defined(_MSC_VER)
+#define UTEST_SURPRESS_MSVC_WARNINGS_BEGIN                                     \
+  __pragma(warning(push)) __pragma(warning(disable : 4711))
+#define UTEST_SURPRESS_MSVC_WARNINGS_END __pragma(warning(pop))
 #else
-#define UTEST_SURPRESS_WARNINGS_BEGIN
-#define UTEST_SURPRESS_WARNINGS_END
+#define UTEST_SURPRESS_MSVC_WARNINGS_BEGIN
+#define UTEST_SURPRESS_MSVC_WARNINGS_END
 #endif
+
+#if defined(__clang__)
+#if __has_warning("-Wunsafe-buffer-usage-in-libc-call")
+#define UTEST_SURPRESS_UNSAFE_BUFFER_USAGE                                     \
+  _Pragma("clang diagnostic ignored \"-Wunsafe-buffer-usage\"")                \
+      _Pragma("clang diagnostic ignored \"-Wunsafe-buffer-usage-in-libc-call\"")
+#elif __has_warning("-Wunsafe-buffer-usage")
+#define UTEST_SURPRESS_UNSAFE_BUFFER_USAGE                                     \
+  _Pragma("clang diagnostic ignored \"-Wunsafe-buffer-usage\"")
+#else
+#define UTEST_SURPRESS_UNSAFE_BUFFER_USAGE
+#endif
+
+#if __has_warning("-Wglobal-constructors")
+#define UTEST_SURPRESS_GLOBAL_CONSTRUCTORS                                     \
+  _Pragma("clang diagnostic ignored \"-Wglobal-constructors\"")
+#else
+#define UTEST_SURPRESS_GLOBAL_CONSTRUCTORS
+#endif
+
+#define UTEST_SURPRESS_COMPILER_WARNINGS_BEGIN                                 \
+  _Pragma("clang diagnostic push")                                             \
+      UTEST_SURPRESS_UNSAFE_BUFFER_USAGE                                       \
+          UTEST_SURPRESS_GLOBAL_CONSTRUCTORS
+#define UTEST_SURPRESS_COMPILER_WARNINGS_END _Pragma("clang diagnostic pop")
 #elif defined(__GNUC__) && __GNUC__ >= 8 && defined(__cplusplus)
-#define UTEST_SURPRESS_WARNINGS_BEGIN                                          \
+#define UTEST_SURPRESS_COMPILER_WARNINGS_BEGIN                                 \
   _Pragma("GCC diagnostic push")                                               \
       _Pragma("GCC diagnostic ignored \"-Wclass-memaccess\"")
-#define UTEST_SURPRESS_WARNINGS_END _Pragma("GCC diagnostic pop")
+#define UTEST_SURPRESS_COMPILER_WARNINGS_END _Pragma("GCC diagnostic pop")
 #else
-#define UTEST_SURPRESS_WARNINGS_BEGIN
-#define UTEST_SURPRESS_WARNINGS_END
+#define UTEST_SURPRESS_COMPILER_WARNINGS_BEGIN
+#define UTEST_SURPRESS_COMPILER_WARNINGS_END
 #endif
+
+#define UTEST_SURPRESS_WARNINGS_BEGIN                                          \
+  UTEST_SURPRESS_MSVC_WARNINGS_BEGIN UTEST_SURPRESS_COMPILER_WARNINGS_BEGIN
+#define UTEST_SURPRESS_WARNINGS_END                                            \
+  UTEST_SURPRESS_COMPILER_WARNINGS_END UTEST_SURPRESS_MSVC_WARNINGS_END
 
 #define UTEST(SET, NAME)                                                       \
   UTEST_SURPRESS_WARNINGS_BEGIN                                                \
@@ -1174,6 +1407,8 @@ utest_strncpy_gcc(char *const dst, const char *const src, const size_t size) {
       utest_state.tests[index].func = &utest_##SET##_##NAME;                   \
       utest_state.tests[index].name = name;                                    \
       utest_state.tests[index].index = 0;                                      \
+      utest_state.tests[index].file = __FILE__;                                \
+      utest_state.tests[index].line = __LINE__;                                \
       UTEST_SNPRINTF(name, name_size, "%s", name_part);                        \
     } else {                                                                   \
       if (utest_state.tests) {                                                 \
@@ -1227,6 +1462,9 @@ utest_strncpy_gcc(char *const dst, const char *const src, const size_t size) {
     if (utest_state.tests && name) {                                           \
       utest_state.tests[index].func = &utest_f_##FIXTURE##_##NAME;             \
       utest_state.tests[index].name = name;                                    \
+      utest_state.tests[index].index = 0;                                      \
+      utest_state.tests[index].file = __FILE__;                                \
+      utest_state.tests[index].line = __LINE__;                                \
       UTEST_SNPRINTF(name, name_size, "%s", name_part);                        \
     } else {                                                                   \
       if (utest_state.tests) {                                                 \
@@ -1282,8 +1520,11 @@ utest_strncpy_gcc(char *const dst, const char *const src, const size_t size) {
         utest_state.tests[index].func = &utest_i_##FIXTURE##_##NAME##_##INDEX; \
         utest_state.tests[index].index = i;                                    \
         utest_state.tests[index].name = name;                                  \
+        utest_state.tests[index].file = __FILE__;                              \
+        utest_state.tests[index].line = __LINE__;                              \
         iUp = UTEST_CAST(utest_uint64_t, i);                                   \
-        UTEST_SNPRINTF(name, name_size, "%s/%" UTEST_PRIu64, name_part, iUp);  \
+        UTEST_SNPRINTF(name, name_size, "%s/%" UTEST_PRIu64, name_part,        \
+                       UTEST_UINT64_ARG(iUp));                                 \
       } else {                                                                 \
         if (utest_state.tests) {                                               \
           free(utest_state.tests);                                             \
@@ -1313,7 +1554,7 @@ double utest_fabs(double d) {
     utest_uint64_t u;
   } both;
   both.d = d;
-  both.u &= 0x7fffffffffffffffu;
+  both.u &= ~(UTEST_CAST(utest_uint64_t, 1) << 63);
   return both.d;
 }
 
@@ -1326,8 +1567,8 @@ int utest_isnan(double d) {
     utest_uint64_t u;
   } both;
   both.d = d;
-  both.u &= 0x7fffffffffffffffu;
-  return both.u > 0x7ff0000000000000u;
+  both.u &= ~(UTEST_CAST(utest_uint64_t, 1) << 63);
+  return both.u > (UTEST_CAST(utest_uint64_t, 0x7ff00000) << 32);
 }
 
 #ifdef __clang__
@@ -1338,6 +1579,9 @@ int utest_isnan(double d) {
 #if __has_warning("-Wunsafe-buffer-usage")
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunsafe-buffer-usage"
+#if __has_warning("-Wunsafe-buffer-usage-in-libc-call")
+#pragma clang diagnostic ignored "-Wunsafe-buffer-usage-in-libc-call"
+#endif
 #endif
 #endif
 
@@ -1349,64 +1593,91 @@ UTEST_WEAK int utest_should_filter_test(const char *filter,
     const char *filter_cur = filter;
     const char *testcase_cur = testcase;
     const char *filter_wildcard = UTEST_NULL;
+    const char *testcase_resume = UTEST_NULL;
 
-    while (('\0' != *filter_cur) && ('\0' != *testcase_cur)) {
-      if ('*' == *filter_cur) {
-        /* store the position of the wildcard */
-        filter_wildcard = filter_cur;
-
-        /* skip the wildcard character */
+    while ('\0' != *testcase_cur) {
+      if (('*' != *filter_cur) && (*filter_cur == *testcase_cur)) {
+        /* literal match, consume a character from each */
         filter_cur++;
-
-        while (('\0' != *filter_cur) && ('\0' != *testcase_cur)) {
-          if ('*' == *filter_cur) {
-            /*
-               we found another wildcard (filter is something like *foo*) so we
-               exit the current loop, and return to the parent loop to handle
-               the wildcard case
-            */
-            break;
-          } else if (*filter_cur != *testcase_cur) {
-            /* otherwise our filter didn't match, so reset it */
-            filter_cur = filter_wildcard;
-          }
-
-          /* move testcase along */
-          testcase_cur++;
-
-          /* move filter along */
-          filter_cur++;
-        }
-
-        if (('\0' == *filter_cur) && ('\0' == *testcase_cur)) {
-          return 0;
-        }
-
-        /* if the testcase has been exhausted, we don't have a match! */
-        if ('\0' == *testcase_cur) {
-          return 1;
-        }
+        testcase_cur++;
+      } else if ('*' == *filter_cur) {
+        /* remember where to resume should the rest fail to match */
+        filter_wildcard = filter_cur++;
+        testcase_resume = testcase_cur;
+      } else if (UTEST_NULL != filter_wildcard) {
+        /* let the last wildcard swallow one more character and retry */
+        filter_cur = filter_wildcard + 1;
+        testcase_resume++;
+        testcase_cur = testcase_resume;
       } else {
-        if (*testcase_cur != *filter_cur) {
-          /* test case doesn't match filter */
-          return 1;
-        } else {
-          /* move our filter and testcase forward */
-          testcase_cur++;
-          filter_cur++;
-        }
+        /* test case doesn't match filter */
+        return 1;
       }
     }
 
-    if (('\0' != *filter_cur) ||
-        (('\0' != *testcase_cur) &&
-         ((filter == filter_cur) || ('*' != filter_cur[-1])))) {
+    /* a wildcard may stand for nothing, so any left over still match */
+    while ('*' == *filter_cur) {
+      filter_cur++;
+    }
+
+    if ('\0' != *filter_cur) {
       /* we have a mismatch! */
       return 1;
     }
   }
 
   return 0;
+}
+
+/* Sort tests by definition location to avoid translation unit registration
+   order. The index/name tie-breakers make same-line tests deterministic. */
+UTEST_WEAK
+int utest_test_state_cmp(const void *lhs, const void *rhs);
+UTEST_WEAK int utest_test_state_cmp(const void *lhs, const void *rhs) {
+  const struct utest_test_state_s *const lhs_test =
+      UTEST_PTR_CAST(const struct utest_test_state_s *, lhs);
+  const struct utest_test_state_s *const rhs_test =
+      UTEST_PTR_CAST(const struct utest_test_state_s *, rhs);
+  int result = 0;
+
+  if (lhs_test->file != rhs_test->file) {
+    result = strcmp(lhs_test->file, rhs_test->file);
+    if (0 != result) {
+      return result;
+    }
+  }
+
+  if (lhs_test->line < rhs_test->line) {
+    return -1;
+  }
+
+  if (lhs_test->line > rhs_test->line) {
+    return 1;
+  }
+
+  if (lhs_test->index < rhs_test->index) {
+    return -1;
+  }
+
+  if (lhs_test->index > rhs_test->index) {
+    return 1;
+  }
+
+  if (lhs_test->name != rhs_test->name) {
+    result = strcmp(lhs_test->name, rhs_test->name);
+    if (0 != result) {
+      return result;
+    }
+  }
+
+  return 0;
+}
+
+static UTEST_INLINE void utest_sort_tests(void) {
+  if (utest_state.tests && (utest_state.tests_length > 1)) {
+    qsort(UTEST_PTR_CAST(void *, utest_state.tests), utest_state.tests_length,
+          sizeof(utest_state.tests[0]), utest_test_state_cmp);
+  }
 }
 
 static UTEST_INLINE FILE *utest_fopen(const char *filename, const char *mode) {
@@ -1483,6 +1754,7 @@ int utest_main(int argc, const char *const argv[]) {
                UTEST_STRNCMP(argv[index], output_str, strlen(output_str))) {
       utest_state.output = utest_fopen(argv[index] + strlen(output_str), "w+");
     } else if (0 == UTEST_STRNCMP(argv[index], list_str, strlen(list_str))) {
+      utest_sort_tests();
       for (index = 0; index < utest_state.tests_length; index++) {
         UTEST_PRINTF("%s\n", utest_state.tests[index].name);
       }
@@ -1511,6 +1783,8 @@ int utest_main(int argc, const char *const argv[]) {
       random_order = 1;
     }
   }
+
+  utest_sort_tests();
 
   if (random_order) {
     // Use Fisher-Yates with the Durstenfield's version to randomly re-order the
@@ -1542,16 +1816,16 @@ int utest_main(int argc, const char *const argv[]) {
   }
 
   printf("%s[==========]%s Running %" UTEST_PRIu64 " test cases.\n",
-         colours[GREEN], colours[RESET], UTEST_CAST(utest_uint64_t, ran_tests));
+         colours[GREEN], colours[RESET], UTEST_UINT64_ARG(ran_tests));
 
   if (utest_state.output) {
     fprintf(utest_state.output, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     fprintf(utest_state.output,
             "<testsuites tests=\"%" UTEST_PRIu64 "\" name=\"All\">\n",
-            UTEST_CAST(utest_uint64_t, ran_tests));
+            UTEST_UINT64_ARG(ran_tests));
     fprintf(utest_state.output,
             "<testsuite name=\"Tests\" tests=\"%" UTEST_PRIu64 "\">\n",
-            UTEST_CAST(utest_uint64_t, ran_tests));
+            UTEST_UINT64_ARG(ran_tests));
   }
 
   for (index = 0; index < utest_state.tests_length; index++) {
@@ -1631,28 +1905,28 @@ int utest_main(int argc, const char *const argv[]) {
 
       if (UTEST_TEST_FAILURE == result) {
         printf("%s[  FAILED  ]%s %s (%" UTEST_PRId64 "%s)\n", colours[RED],
-               colours[RESET], utest_state.tests[index].name, time,
-               units[unit_index]);
+               colours[RESET], utest_state.tests[index].name,
+               UTEST_INT64_ARG(time), units[unit_index]);
       } else if (UTEST_TEST_SKIPPED == result) {
         printf("%s[  SKIPPED ]%s %s (%" UTEST_PRId64 "%s)\n", colours[YELLOW],
-               colours[RESET], utest_state.tests[index].name, time,
-               units[unit_index]);
+               colours[RESET], utest_state.tests[index].name,
+               UTEST_INT64_ARG(time), units[unit_index]);
       } else {
         printf("%s[       OK ]%s %s (%" UTEST_PRId64 "%s)\n", colours[GREEN],
-               colours[RESET], utest_state.tests[index].name, time,
-               units[unit_index]);
+               colours[RESET], utest_state.tests[index].name,
+               UTEST_INT64_ARG(time), units[unit_index]);
       }
     }
   }
 
   printf("%s[==========]%s %" UTEST_PRIu64 " test cases ran.\n", colours[GREEN],
-         colours[RESET], ran_tests);
+         colours[RESET], UTEST_UINT64_ARG(ran_tests));
   printf("%s[  PASSED  ]%s %" UTEST_PRIu64 " tests.\n", colours[GREEN],
-         colours[RESET], ran_tests - failed - skipped);
+         colours[RESET], UTEST_UINT64_ARG(ran_tests - failed - skipped));
 
   if (0 != skipped) {
     printf("%s[  SKIPPED ]%s %" UTEST_PRIu64 " tests, listed below:\n",
-           colours[YELLOW], colours[RESET], skipped);
+           colours[YELLOW], colours[RESET], UTEST_UINT64_ARG(skipped));
     for (index = 0; index < skipped_testcases_length; index++) {
       printf("%s[  SKIPPED ]%s %s\n", colours[YELLOW], colours[RESET],
              utest_state.tests[skipped_testcases[index]].name);
@@ -1661,7 +1935,7 @@ int utest_main(int argc, const char *const argv[]) {
 
   if (0 != failed) {
     printf("%s[  FAILED  ]%s %" UTEST_PRIu64 " tests, listed below:\n",
-           colours[RED], colours[RESET], failed);
+           colours[RED], colours[RESET], UTEST_UINT64_ARG(failed));
     for (index = 0; index < failed_testcases_length; index++) {
       printf("%s[  FAILED  ]%s %s\n", colours[RED], colours[RESET],
              utest_state.tests[failed_testcases[index]].name);
@@ -1700,7 +1974,42 @@ cleanup:
    data without having to use the UTEST_MAIN macro, thus allowing them to write
    their own main() function.
 */
+#if defined(_MSC_VER)
+#if defined(__clang__)
+#define UTEST_DEFINE_PRINTF_CLANG_BEGIN                                        \
+  _Pragma("clang diagnostic push")                                             \
+      _Pragma("clang diagnostic ignored \"-Wformat-nonliteral\"")
+#define UTEST_DEFINE_PRINTF_CLANG_END _Pragma("clang diagnostic pop")
+#else
+#define UTEST_DEFINE_PRINTF_CLANG_BEGIN
+#define UTEST_DEFINE_PRINTF_CLANG_END
+#endif
+
+#define UTEST_DEFINE_PRINTF_HELPER()                                           \
+  __pragma(warning(push)) __pragma(warning(disable : 4710))                    \
+      UTEST_DEFINE_PRINTF_CLANG_BEGIN UTEST_C_FUNC __declspec(noinline) int    \
+      utest_printf_msvc(const char *format, ...) {                             \
+    int result;                                                                \
+    va_list args;                                                              \
+    if (utest_state.output) {                                                  \
+      va_start(args, format);                                                  \
+      (void)vfprintf(utest_state.output, format, args);                        \
+      va_end(args);                                                            \
+    }                                                                          \
+    va_start(args, format);                                                    \
+    result = vfprintf(stdout, format, args);                                   \
+    va_end(args);                                                              \
+    return result;                                                             \
+  }                                                                            \
+  UTEST_DEFINE_PRINTF_CLANG_END __pragma(warning(pop))
+
+#define UTEST_STATE()                                                          \
+  struct utest_state_s utest_state = {0, 0, 0};                                \
+  UTEST_DEFINE_PRINTF_HELPER()                                                 \
+  extern int utest_state_requires_trailing_semicolon
+#else
 #define UTEST_STATE() struct utest_state_s utest_state = {0, 0, 0}
+#endif
 
 /*
    define a main() function to call into utest.h and start executing tests! A
@@ -1714,5 +2023,9 @@ cleanup:
   int main(int argc, const char *const argv[]) {                               \
     return utest_main(argc, argv);                                             \
   }
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 #endif /* SHEREDOM_UTEST_H_INCLUDED */
