@@ -525,12 +525,12 @@ static int cmsis_dap_elaphurelink_open(struct cmsis_dap *dap, const uint16_t vid
 	ctx->async_close_work.data = ctx;
 	ret = uv_async_init(ctx->loop, &ctx->async_close_work, async_close_work);
 	if (ret)
-		goto fail;
+		goto fail_async_write;
 
 	ctx->socket.data = ctx;
 	ret = uv_tcp_init(ctx->loop, &ctx->socket);
 	if (ret)
-		goto fail;
+		goto fail_async_close;
 
 	hints.ai_family = PF_INET;
 	hints.ai_socktype = SOCK_STREAM;
@@ -544,13 +544,13 @@ static int cmsis_dap_elaphurelink_open(struct cmsis_dap *dap, const uint16_t vid
 			break;
 		} else if (ret != UV_EAI_NONAME) {
 			LOG_ERROR("elaphureLink: DNS resolve failed, %s, %d\n", uv_strerror(ret), ret);
-			goto fail;
+			goto fail_socket;
 		}
 	}
 
 	if (ret) {
 		LOG_ERROR("elaphureLink: DNS resolve retry failed\n");
-		goto fail;
+		goto fail_socket;
 	}
 
 	dest = (struct sockaddr_in *)getaddr_req.addrinfo->ai_addr;
@@ -565,28 +565,31 @@ static int cmsis_dap_elaphurelink_open(struct cmsis_dap *dap, const uint16_t vid
 
 	if (ctx->last_read_error) {
 		ret = ctx->last_read_error;
-		goto fail;
+		goto fail_socket;
 	}
 
 	ret = uv_thread_create(&ctx->work_thread_tid, &vendor_command_work_thread, ctx);
 	if (ret) {
 		LOG_ERROR("elaphureLink: Failed to create work thread, ret:%d\n", ret);
-		uv_close((uv_handle_t *)&ctx->socket, NULL);
-		uv_run(ctx->loop, UV_RUN_DEFAULT);
-		goto fail;
+		goto fail_socket;
 	}
 
 	ret = elaphurelink_handshake(ctx);
 	if (ret) {
 		LOG_ERROR("elaphureLink: Failed to handshake, ret:%d\n", ret);
-		goto fail_handshake;
+		uv_async_send(&ctx->async_close_work);
+		uv_thread_join(&ctx->work_thread_tid);
+		goto fail;
 	}
 
 	return ERROR_OK;
-
-fail_handshake:
-	uv_async_send(&ctx->async_close_work);
-	uv_thread_join(&ctx->work_thread_tid);
+fail_socket:
+	uv_close((uv_handle_t *)&ctx->socket, NULL);
+fail_async_close:
+	uv_close((uv_handle_t *)&ctx->async_close_work, NULL);
+fail_async_write:
+	uv_close((uv_handle_t *)&ctx->async_write_work, NULL);
+	uv_run(ctx->loop, UV_RUN_DEFAULT);
 fail:
 	uv_cond_destroy(&ctx->write_producer_cond);
 	uv_cond_destroy(&ctx->read_producer_cond);
