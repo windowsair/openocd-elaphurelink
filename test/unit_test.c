@@ -358,7 +358,7 @@ UTEST(write_only, write)
 	}
 
 	k_server_done = false;
-	while (k_server_done) {
+	while (!k_server_done) {
 		usleep(1000);
 	}
 
