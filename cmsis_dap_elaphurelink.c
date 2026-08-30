@@ -595,6 +595,10 @@ fail:
 	uv_mutex_destroy(&ctx->read_producer_mutex);
 	uv_mutex_destroy(&ctx->read_consumer_mutex);
 	free(ctx);
+	dap->bdata = NULL;
+	dap->packet_buffer = NULL;
+	dap->command = NULL;
+	dap->response = NULL;
 	return ret;
 }
 
