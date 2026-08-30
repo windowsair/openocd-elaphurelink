@@ -396,9 +396,9 @@ static void async_write_buffer_send_work(uv_async_t *async)
 
 		ret = uv_write(&handle->req, (uv_stream_t *)&ctx->socket, &handle->buf, 1, write_buffer_cb);
 		if (ret)
-			LOG_WARNING("Failed to write, ret:%d\n", ret);
-
-		atomic_store_explicit(&handle->status, BUFFER_SENDING, memory_order_release);
+			write_buffer_cb(&handle->req, ret);
+		else
+			atomic_store_explicit(&handle->status, BUFFER_SENDING, memory_order_release);
 		atomic_fetch_sub(&ctx->async_write_request_num, 1);
 	}
 }
